@@ -1,0 +1,60 @@
+services:
+  aggregator-app:
+    build: .
+    container_name: aggregator-php
+    restart: unless-stopped
+    volumes:
+      - .:/var/www/html
+    networks:
+      - aggregator_network
+
+  aggregator-nginx:
+    image: nginx:stable-alpine
+    container_name: aggregator-web
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - .:/var/www/html
+    depends_on:
+      - aggregator-app
+    networks:
+      - aggregator_network
+
+  aggregator-mysql:
+    image: mysql:8.0
+    container_name: aggregator-db
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: etSPeDzinOmcIP6hi
+      MYSQL_DATABASE: laravel_db
+      MYSQL_USER: laravel_user
+      MYSQL_PASSWORD: tUk6UJQlA0TrbyG7b
+    volumes:
+      - aggregator_mysql_data:/var/lib/mysql
+    networks:
+      - aggregator_network
+
+  aggregator-redis:
+    image: redis:alpine
+    container_name: aggregator-redis
+    networks:
+      - aggregator_network
+
+  aggregator-scheduler:
+    build: .
+    container_name: aggregator-scheduler
+    restart: unless-stopped
+    volumes:
+      - .:/var/www/html
+    command: php artisan schedule:work
+    networks:
+      - aggregator_network
+
+networks:
+  aggregator_network:
+    driver: bridge
+
+volumes:
+  aggregator_mysql_data:
