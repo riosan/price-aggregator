@@ -9,26 +9,27 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-    public function up(): void {
+    public function up(): void
+    {
         Schema::create('categories', function (Blueprint $table) {
-            $table->id(); 
-            $table->string('name'); 
-            $table->string('slug')->unique(); 
+            $table->id();
+            $table->string('name');
+            $table->string('slug')->unique();
             $table->timestamps();
         });
 
         Schema::create('shops', function (Blueprint $table) {
-            $table->id(); 
-            $table->string('name'); 
-            $table->string('domain'); 
-            $table->json('config')->nullable(); 
+            $table->id();
+            $table->string('name');
+            $table->string('domain');
+            $table->json('config')->nullable();
             $table->timestamps();
         });
 
         Schema::create('products', function (Blueprint $table) {
-            $table->id(); 
-            $table->foreignId('category_id')->constrained()->cascadeOnDelete(); 
-            $table->string('name'); 
+            $table->id();
+            $table->foreignId('category_id')->constrained()->cascadeOnDelete();
+            $table->string('name');
             $table->timestamps();
         });
 

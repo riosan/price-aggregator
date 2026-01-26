@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
 use App\Models\ProductOffer;
 use App\Services\ParserService;
+use Illuminate\Console\Command;
 
 class ParsePrices extends Command
 {
@@ -23,13 +23,14 @@ class ParsePrices extends Command
      */
     public function handle(ParserService $parserService)
     {
-        $this->info('--- Запуск парсинга: ' . now()->toDateTimeString() . ' ---');
+        $this->info('--- Запуск парсинга: '.now()->toDateTimeString().' ---');
 
         // 1. Получаем все активные предложения вместе с конфигами магазинов
         $offers = ProductOffer::with('shop')->get();
 
         if ($offers->isEmpty()) {
             $this->warn('Предложений для парсинга не найдено. Сначала добавьте данные через Seeder.');
+
             return;
         }
 

@@ -6,9 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class PriceHistory extends Model
 {
-        protected $casts = [
+    protected $casts = [
         'created_at' => 'datetime',
-        'price' => 'decimal:2'
+        'price' => 'decimal:2',
     ];
 
     // Specifying the exact name of the migration table

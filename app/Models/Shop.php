@@ -8,7 +8,6 @@ class Shop extends Model
 {
     protected $fillable = ['name', 'domain', 'config', 'is_active'];
 
-    
     protected $casts = [
         'config' => 'array',
     ];
