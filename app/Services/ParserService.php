@@ -10,10 +10,13 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class ParserService
 {
+    /**
+     * Batch parse prices using concurrent search requests.
+     */
     public function parseBatch($offers): void
     {
         $responses = Http::pool(fn (Pool $pool) => $offers->map(function ($offer) use ($pool) {
-            // URL теперь гибкий, но с рабочей структурой
+            // Build search URL using the shop domain from database
             $searchUrl = "https://{$offer->shop->domain}/ua/computer/videokarty/?q=".urlencode($offer->product->name);
 
             return $pool->withHeaders([
@@ -30,30 +33,36 @@ class ParserService
         }
     }
 
+    /**
+     * Process single search result HTML and update price data.
+     */
     private function processSearchResult($offer, $html): void
     {
         $crawler = new Crawler($html);
 
-        // БЕРЕМ ИЗ БД, но если там пусто или нет точки — исправляем на лету
+        // Fetch selectors from shop configuration or use defaults
         $config = $offer->shop->config;
         $itemClass = $config['item_selector'] ?? '.list-item';
         $priceClass = $config['price_selector'] ?? '.list-item__value-price';
 
-        // Гарантируем наличие точки для селектора класса
+        // Ensure selectors start with a dot for CSS class identification
         $itemSelector = str_starts_with($itemClass, '.') ? $itemClass : ".$itemClass";
         $priceSelector = str_starts_with($priceClass, '.') ? $priceClass : ".$priceClass";
 
+        // Filter the first matching product container
         $item = $crawler->filter($itemSelector)->first();
 
         if ($item->count() > 0) {
+            // Locate the price node within the item container
             $priceNode = $item->filter($priceSelector);
 
             if ($priceNode->count() > 0) {
                 $priceRaw = $priceNode->first()->text();
 
-                // Чистим как в старом добром методе
+                // Clean price string by removing all non-numeric characters
                 $priceCleaned = preg_replace('/[^\d]/', '', $priceRaw);
 
+                // Handle cases with concatenated IDs/prices (hotline-specific logic)
                 if (strlen($priceCleaned) > 8) {
                     $newPrice = (float) substr($priceCleaned, -5);
                 } else {
@@ -61,7 +70,7 @@ class ParserService
                 }
 
                 if ($newPrice > 0) {
-                    // Убрали проверку на неравенство, чтобы ты видел обновления в БД сразу
+                    // Update current offer and record price history
                     $offer->update([
                         'old_price' => $offer->price,
                         'price' => $newPrice,
