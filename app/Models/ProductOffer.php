@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProductOffer extends Model
-{
+{    
     protected $fillable = ['product_id', 'shop_id', 'url', 'price', 'old_price', 'last_parsed_at'];
 
     protected $casts = [
