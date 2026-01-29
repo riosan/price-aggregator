@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\PriceHistory;
+use App\Models\ProductOffer; // Добавили прямой импорт
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -10,69 +11,60 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class ParserService
 {
-    /**
-     * Batch parse prices using concurrent search requests.
-     */
     public function parseBatch($offers): void
     {
         $responses = Http::pool(fn (Pool $pool) => $offers->map(function ($offer) use ($pool) {
-            // Build search URL using the shop domain from database
-            $searchUrl = "https://{$offer->shop->domain}/ua/computer/videokarty/?q=".urlencode($offer->product->name);
+            $searchUrl = "https://{$offer->shop->domain}/ua/computer/videokarty/?q=" . urlencode($offer->product->name);
 
             return $pool->withHeaders([
                 'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            ])->timeout(15)->get($searchUrl);
+            ])
+            ->withOptions(['allow_redirects' => true])
+            ->timeout(15)
+            ->get($searchUrl);
         }));
 
         foreach ($responses as $index => $response) {
             if ($response instanceof \Illuminate\Http\Client\Response && $response->ok()) {
-                $this->processSearchResult($offers[$index], $response->body());
-            } else {
-                Log::error("Request failed for {$offers[$index]->product->name}");
+                // ПЕРЕДАЕМ ID ВМЕСТО ОБЪЕКТА, ЧТОБЫ ИСКЛЮЧИТЬ КЭШ ПАМЯТИ
+                $this->processSearchResult($offers[$index]->id, $response->body());
             }
         }
     }
 
-    /**
-     * Process single search result HTML and update price data.
-     */
-    private function processSearchResult($offer, $html): void
+    private function processSearchResult($offerId, $html): void
     {
-        $crawler = new Crawler($html);
+        // 1. ДОСТАЕМ СВЕЖАЙШИЙ ОБЪЕКТ ИЗ БАЗЫ ПО ID ПРЯМО СЕЙЧАС
+        $offer = ProductOffer::with('shop', 'product')->find($offerId);
+        if (!$offer) return;
 
-        // Fetch selectors from shop configuration or use defaults
+        $crawler = new Crawler($html);
         $config = $offer->shop->config;
+        
         $itemClass = $config['item_selector'] ?? '.list-item';
         $priceClass = $config['price_selector'] ?? '.list-item__value-price';
-
-        // Ensure selectors start with a dot for CSS class identification
         $itemSelector = str_starts_with($itemClass, '.') ? $itemClass : ".$itemClass";
         $priceSelector = str_starts_with($priceClass, '.') ? $priceClass : ".$priceClass";
 
-        // Filter the first matching product container
         $item = $crawler->filter($itemSelector)->first();
 
         if ($item->count() > 0) {
-            // Locate the price node within the item container
             $priceNode = $item->filter($priceSelector);
 
             if ($priceNode->count() > 0) {
                 $priceRaw = $priceNode->first()->text();
+                $priceCleaned = preg_replace('/[^\d]/', '', str_replace(["\xc2\xa0", "\xa0", " "], '', $priceRaw));
 
-                // Clean price string by removing all non-numeric characters
-                $priceCleaned = preg_replace('/[^\d]/', '', $priceRaw);
-
-                // Handle cases with concatenated IDs/prices (hotline-specific logic)
-                if (strlen($priceCleaned) > 8) {
-                    $newPrice = (float) substr($priceCleaned, -5);
-                } else {
-                    $newPrice = (float) $priceCleaned;
-                }
+                $newPrice = (strlen($priceCleaned) > 8) ? (float) substr($priceCleaned, -5) : (float) $priceCleaned;
 
                 if ($newPrice > 0) {
-                    // Update current offer and record price history
+                    $oldPrice = (float) $offer->price;
+
+                    // ЛОГ ДЛЯ ПРОВЕРКИ (СМОТРИ ЕГО В ТЕРМИНАЛЕ)
+                    Log::info("REALTIME CHECK [ID:{$offerId}]: DB={$oldPrice}, SITE={$newPrice}");
+
                     $offer->update([
-                        'old_price' => $offer->price,
+                        'old_price' => $oldPrice,
                         'price' => $newPrice,
                         'last_parsed_at' => now(),
                     ]);
@@ -82,13 +74,44 @@ class ParserService
                         'price' => $newPrice,
                     ]);
 
-                    Log::info("Successfully parsed {$offer->product->name}: {$newPrice}");
+                    // СРАВНИВАЕМ ЧЕРЕЗ ABS ДЛЯ ТОЧНОСТИ
+                    if (abs($oldPrice - $newPrice) > 0.1) {
+                        Log::info("!!! SUCCESS: Price change. Sending Telegram for ID:{$offerId}");
+                        $this->sendTelegramNotification($offer->product->name, $oldPrice, $newPrice, $offer->url);
+                    }
                 }
-            } else {
-                Log::warning("Price node not found with selector: $priceSelector");
             }
-        } else {
-            Log::warning("Item container not found with selector: $itemSelector");
+        }
+    }
+
+    private function sendTelegramNotification($productName, $oldPrice, $newPrice, $url): void
+    {
+        $token = config('services.telegram.token');
+        $chatId = config('services.telegram.chat_id');
+
+        if (!$token || !$chatId) {
+            Log::error("TELEGRAM ERROR: Keys missing in config!");
+            return;
+        }
+
+        $status = ($newPrice < $oldPrice) ? "📉 *Price Drop!*" : "📈 *Price Increase*";
+        
+        $message = "{$status}\n\n" .
+                   "*Product:* {$productName}\n" .
+                   "*Old Price:* " . number_format($oldPrice, 0, '.', ' ') . " ₴\n" .
+                   "*New Price:* " . number_format($newPrice, 0, '.', ' ') . " ₴";
+
+        $response = Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
+            'chat_id' => $chatId,
+            'text' => $message,
+            'parse_mode' => 'Markdown',
+            'reply_markup' => json_encode([
+                'inline_keyboard' => [[['text' => '🚀 Open Product Page', 'url' => $url]]]
+            ])
+        ]);
+
+        if (!$response->successful()) {
+            Log::error("TELEGRAM API FAIL: " . $response->body());
         }
     }
 }
