@@ -19,7 +19,7 @@ A professional-grade price monitoring engine built with **Laravel 12** and **Swo
 
 ## 📦 Installation & Setup Guide
 
-Follow these steps to get the project running locally in a Docker environment.
+Follow these steps to get the project running locally in a Docker environment. 
 
 ### 1. Clone the repository
 ```bash
